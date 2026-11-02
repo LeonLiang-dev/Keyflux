@@ -50,12 +50,13 @@ This was an execution-environment restriction, not a bypass of hardware gates.
 
 ## Remaining work
 
-The Air75 descriptor is still `recognized`; solid lighting, restore, per-key
+At completion of phase 1 the Air75 descriptor was `recognized`; solid lighting, restore, per-key
 and readback capability claims remain false. The existing preview stays
 `preview_only`, and the desktop application still connects only supported
 Kick75 devices. The 104 count does not establish a physical LED mapping.
 
 Lighting writes, exact original-state recovery, RGB encoding, flash persistence,
 physical unplug/replug, sleep/wake, wireless control and Windows hardware support
-were not tested or enabled. The frontend and Rust shell were not modified, and
+were not tested or enabled in phase 1. Manual main control was subsequently
+implemented in [phase 2](2026-11-02-air75-v3-main.md). The frontend and Rust shell were not modified, and
 their full UI/manual hardware suites were not rerun for this CLI-only phase.

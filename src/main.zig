@@ -8,6 +8,7 @@ const codex = @import("codex.zig");
 const otlp = @import("otlp.zig");
 const kick75 = @import("kick75.zig");
 const air75 = @import("air75.zig");
+const air75_control = @import("air75_control.zig");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const max_request = 512 * 1024;
@@ -16,6 +17,9 @@ const usage =
     \\  keyflux diagnose                       Read-only NuPhy HID inventory
     \\  keyflux hardware-probe                 Read-only Kick75 firmware / light state
     \\  keyflux hardware-probe-air75           Read-only Air75 V3 ANSI 1.0.23.6 snapshot
+    \\  keyflux hardware-status-air75          Air75 main recovery status (Mac USB)
+    \\  keyflux hardware-solid-air75 '#00FFFF' 15   Manual Air75 main color + capture
+    \\  keyflux hardware-restore-air75         Exact Air75 original main recovery
     \\  keyflux hardware-status                Read-only device + durable recovery status
     \\  keyflux hardware-solid '#00FFFF' 15    Manual main-light color; durable capture
     \\  keyflux hardware-effect                Main-zone native action JSON on stdin
@@ -33,8 +37,8 @@ const usage =
     \\  keyflux gate evidence.json             Exit 2 until every release gate passes
     \\  keyflux setup-codex /absolute/keyflux   Print reviewable hook and OTel fragments
     \\  --state-dir PATH                       Isolated runtime data / IPC namespace
-    \\Hardware commands: experimental macOS / USB / Kick75 4.0.18.6 / Mac profile only.
-    \\Hardware commands use the default recovery directory; the desktop follower owns writes.
+    \\Experimental macOS USB control: Kick75 4.0.18.6 or Air75 V3 ANSI 1.0.23.6, Mac profile.
+    \\Physical mutations use the default recovery directory; Air75 control is manual CLI only.
     \\
 ;
 
@@ -415,6 +419,31 @@ fn run(init: std.process.Init) !void {
         try output(a, try air75.probe());
         return;
     }
+    if (eq(command, "hardware-solid-air75") or eq(command, "hardware-restore-air75") or eq(command, "hardware-status-air75")) {
+        if (directory != null or simulate or port != 0) return error.HardwareRequiresDefaultStateDirectory;
+        const status_only = eq(command, "hardware-status-air75");
+        var light: ?devices.Lighting = null;
+        if (eq(command, "hardware-solid-air75")) {
+            if (positional.items.len != 3) return error.ExpectedColorAndBrightness;
+            light = .{ .color = try themes.Color.parse(positional.items[1]), .brightness = try std.fmt.parseInt(u8, positional.items[2], 10) };
+            if (light.?.brightness > 100) return error.InvalidBrightness;
+        } else if (positional.items.len != 1 or (status_only and expected_device != null)) return error.UnexpectedArgument;
+        if (p.kf_init(null) != 0) return error.StateDirectoryUnavailable;
+        var keyboard: air75_control.Keyboard = .{};
+        try keyboard.connect();
+        defer keyboard.close();
+        if (expected_device) |expected| if (!std.mem.eql(u8, expected, &keyboard.fingerprint)) return error.DeviceChanged;
+        var storage: Air75Storage = .{ .allocator = a };
+        if (status_only) {
+            const journal = try storage.load();
+            var recovery_code: ?[]const u8 = null;
+            if (journal) |record| record.validate(keyboard.info, keyboard.fingerprint) catch |err| {
+                recovery_code = @errorName(err);
+            };
+            try output(a, .{ .ok = true, .probe = keyboard.info, .fingerprint = keyboard.fingerprint, .recovery = .{ .required = journal != null, .pending = if (journal) |record| record.pending else false, .compatible = journal != null and recovery_code == null, .code = recovery_code }, .manual_main_control_available = true, .desktop_support_enabled = false });
+        } else try output(a, try air75_control.execute(&keyboard, &storage, light));
+        return;
+    }
     if (eq(command, "hardware-status")) {
         if (directory != null or simulate or port != 0 or expected_device != null or positional.items.len != 1) return error.UnexpectedArgument;
         if (p.kf_init(null) != 0) return error.StateDirectoryUnavailable;
@@ -557,6 +586,19 @@ fn run(init: std.process.Init) !void {
     p.kf_print(response.ptr, response.len, 0);
     try checkResponse(a, response);
 }
+const Air75Storage = struct {
+    allocator: Allocator,
+    pub fn load(self: *Air75Storage) !?air75_control.Journal {
+        const bytes = (try readState(self.allocator, "air75-recovery.json", 16384)) orelse return null;
+        return (std.json.parseFromSlice(air75_control.Journal, self.allocator, bytes, .{}) catch return error.InvalidRecoveryRecord).value;
+    }
+    pub fn save(self: *Air75Storage, journal: air75_control.Journal) !void {
+        try writeState(self.allocator, "air75-recovery.json", journal);
+    }
+    pub fn remove(_: *Air75Storage) !void {
+        if (p.kf_remove_file("air75-recovery.json") != 0) return error.RecoveryRemoveFailed;
+    }
+};
 fn hardware(a: Allocator, light: ?devices.Lighting, action: themes.Action, roundtrip: bool, expected_device: ?[]const u8) !void {
     var keyboard: kick75.Keyboard = .{};
     try keyboard.connect();

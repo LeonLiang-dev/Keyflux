@@ -1,10 +1,12 @@
-/* Air75 V3 one-shot query transport. No lighting/keymap/firmware setters. */
+/* Air75 V3 query transport and separate main-only setter. */
 #define _DARWIN_C_SOURCE 1
 #include "hidapi.h"
 #include "air75_readonly.h"
+#include "air75_main.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <wchar.h>
 #ifdef __APPLE__
 #include "hidapi_darwin.h"
 #include <fcntl.h>
@@ -73,10 +75,7 @@ int kf_air75_descriptor(unsigned char *out, size_t capacity) {
     return air75 ? hid_get_report_descriptor(air75, out, capacity) : -1;
 }
 
-int kf_air75_exchange(const unsigned char frame[64], unsigned char reply[64], unsigned char key) {
-    /* Check before touching HID; no caller can broaden the query allowlist. */
-    if (!kf_air75_read_request_allowed(frame, key))
-        return -7;
+static int exchange_packet(const unsigned char frame[64], unsigned char reply[64]) {
     if (!air75)
         return -1;
     unsigned char discarded[128];
@@ -99,4 +98,31 @@ int kf_air75_exchange(const unsigned char frame[64], unsigned char reply[64], un
         }
     }
     return -10;
+}
+
+int kf_air75_exchange(const unsigned char frame[64], unsigned char reply[64], unsigned char key) {
+    if (!kf_air75_read_request_allowed(frame, key)) return -7;
+    return exchange_packet(frame, reply);
+}
+int kf_air75_write_main(const unsigned char frame[64], unsigned char reply[64], unsigned char key) {
+    if (!kf_air75_main_request_allowed(frame, key)) return -7;
+    return exchange_packet(frame, reply);
+}
+int kf_air75_identity(unsigned char *out, size_t capacity) {
+#ifndef __APPLE__
+    (void)out; (void)capacity;
+    return -5;
+#else
+    uint32_t location = 0;
+    if (!air75 || capacity < 4 || hid_darwin_get_location_id(air75, &location) || !location) return -1;
+    memcpy(out, &location, 4);
+    size_t n = 4;
+    wchar_t serial[256];
+    if (!hid_get_serial_number_string(air75, serial, 256)) {
+        size_t bytes = wcslen(serial) * sizeof(wchar_t);
+        if (bytes > capacity - n) return -1;
+        memcpy(out + n, serial, bytes); n += bytes;
+    }
+    return (int)n;
+#endif
 }

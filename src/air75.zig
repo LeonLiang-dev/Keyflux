@@ -1,4 +1,4 @@
-//! Explicit Air75 V3 ANSI read-only probe; no driver vtable or mutation API.
+//! Air75 V3 read-only probe. Manual mutations live in air75_control.zig.
 const std = @import("std");
 const p = @import("platform.zig");
 const protocol = @import("protocol.zig");
@@ -75,15 +75,30 @@ pub fn inspect(transport: anytype) !Probe {
     return .{ .firmware = identity.bytes[0..6].*, .geometry = geometry[0..6].*, .profile = geometry[0], .profile_name = if (geometry[0] == 0) "mac" else "win", .led_count = leds[0], .state = state[0..22].* };
 }
 
-const Native = struct {
+pub const Native = struct {
+    key: u8 = 0,
     pub fn descriptor(_: *Native, out: []u8) !usize {
         const n = p.kf_air75_descriptor(out.ptr, out.len);
         if (n <= 0) return error.InvalidHidDescriptor;
         return @intCast(n);
     }
-    pub fn exchange(_: *Native, request: protocol.Report, key: u8) !protocol.Report {
+    pub fn exchange(self: *Native, request: protocol.Report, key: u8) !protocol.Report {
         var reply: protocol.Report = undefined;
         switch (p.kf_air75_exchange(&request, &reply, key)) {
+            0 => {
+                if (request[1] == 0xa1) self.key = (try firmware(reply)).key;
+                return reply;
+            },
+            -7 => return error.ForbiddenCommand,
+            -8 => return error.HidWriteFailed,
+            -9 => return error.DeviceDisconnected,
+            -10 => return error.HidTimeout,
+            else => return error.HidExchangeFailed,
+        }
+    }
+    pub fn write(_: *Native, request: protocol.Report, key: u8) !protocol.Report {
+        var reply: protocol.Report = undefined;
+        switch (p.kf_air75_write_main(&request, &reply, key)) {
             0 => return reply,
             -7 => return error.ForbiddenCommand,
             -8 => return error.HidWriteFailed,
@@ -94,7 +109,7 @@ const Native = struct {
     }
 };
 
-pub fn probe() !Probe {
+pub fn open() !void {
     switch (p.kf_air75_open()) {
         0 => {},
         -2 => return error.DeviceBusy,
@@ -103,6 +118,9 @@ pub fn probe() !Probe {
         -5 => return error.UnsupportedPlatform,
         else => return error.HidOpenFailed,
     }
+}
+pub fn probe() !Probe {
+    try open();
     defer p.kf_air75_close();
     var native: Native = .{};
     return inspect(&native);

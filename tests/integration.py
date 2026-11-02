@@ -127,7 +127,7 @@ class RuntimeTest(unittest.TestCase):
         self.assertFalse((self.directory / "kick75-recovery.json").exists())
         self.assertEqual(self.status()["backend"], "simulated")
 
-    def test_air75_probe_options_reject_before_hid_and_model_stays_recognized(self):
+    def test_air75_probe_options_reject_before_hid_and_model_limits_manual_support(self):
         for args in [("--state-dir", str(self.directory)), ("extra",), ("--simulate",), ("--otlp-port", "4318"), ("--expect-device", "a" * 64)]:
             result = subprocess.run([EXE, "hardware-probe-air75", *args], capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 1)
@@ -135,9 +135,21 @@ class RuntimeTest(unittest.TestCase):
         model = Path(__file__).resolve().parents[1] / "models/nuphy-air75-v3.json"
         self.call("validate-model", str(model))
         metadata = json.loads(model.read_text())
-        self.assertEqual(metadata["verification"], "recognized")
-        self.assertEqual(metadata["verified_on"], [])
-        self.assertTrue(all(not value for value in metadata["capabilities"].values()))
+        self.assertEqual(metadata["verification"], "experimental")
+        self.assertEqual(metadata["firmware"]["versions"], ["1.0.23.6"])
+        self.assertTrue(metadata["capabilities"]["solid_main"] and metadata["capabilities"]["restore"])
+        self.assertFalse(metadata["capabilities"]["per_key"])
+        self.assertEqual(metadata["capabilities"]["max_frames_per_second"], 0)
+        self.assertFalse((self.directory / "air75-recovery.json").exists())
+
+    def test_air75_control_rejects_isolated_state_and_invalid_input_before_hid(self):
+        for args in [("hardware-solid-air75", "#00FFFF", "15"), ("hardware-restore-air75",), ("hardware-status-air75",)]:
+            result = self.call(*args, check=False)
+            self.assertEqual(json.loads(result.stdout)["code"], "HardwareRequiresDefaultStateDirectory")
+        for args, code in [(("hardware-solid-air75",), "ExpectedColorAndBrightness"), (("hardware-solid-air75", "#00FFFF", "101"), "InvalidBrightness"), (("hardware-restore-air75", "extra"), "UnexpectedArgument"), (("hardware-status-air75", "extra"), "UnexpectedArgument")]:
+            result = subprocess.run([EXE, *args], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(json.loads(result.stdout)["code"], code)
         self.assertFalse((self.directory / "air75-recovery.json").exists())
 
     def test_theme_v2_side_configuration_roundtrips_without_hardware_enable(self):

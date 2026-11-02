@@ -1,9 +1,9 @@
-# Air75 V3 ANSI: phase 1 read-only probe
+# Air75 V3 ANSI: read-only probe and experimental manual main lighting
 
-This phase queries a wired USB Air75 V3 ANSI on macOS. It does not add the
-keyboard to the desktop catalog, grant lighting writes, or establish that its
-original lighting can be restored. The descriptor stays `recognized`, with
-all lighting and recovery capabilities disabled.
+The read-only probe and separate manual main-light commands target wired USB
+Air75 V3 ANSI, firmware **1.0.23.6**, macOS / Mac profile. The descriptor is
+`experimental`. Manual main-color readback and exact original-state restoration
+passed; desktop connection, AI following, side and per-key setters are not enabled.
 
 ## Usage
 
@@ -52,6 +52,55 @@ trailing A1/A0 bytes, derived key, serial, USB path and location ID are omitted.
 
 Kick75's command, write gates, routing and journal stay separate. Air75's
 keyboard layout stays `preview_only` and outside the desktop catalog.
+
+## Manual main lighting and recovery
+
+```sh
+./zig-out/bin/keyflux hardware-status-air75
+./zig-out/bin/keyflux hardware-solid-air75 '#00FFFF' 15
+./zig-out/bin/keyflux hardware-restore-air75
+# Opt-in three-color test with cleanup; watch the physical keyboard:
+python3 scripts/test-air75-main-macos.py
+```
+
+The solid command keeps its color until explicit restoration. The manual test
+shows red, cyan and purple at 15% brightness for three seconds each and restores
+the initial state on completion or normal interruption. It refuses an older
+recovery capture. Neither this script nor its physical test runs automatically
+in CI. SIGKILL/power loss cannot run cleanup; the durable capture remains.
+
+These commands use the canonical `~/Library/Application Support/Keyflux/air75-recovery.json`.
+They reject `--state-dir`, simulation and OTLP flags. Optional `--expect-device`
+binds mutations to the current 64-character hashed device/port identity reported
+by status. Recovery requires the original device, USB port, firmware and profile.
+The status command is read-only with respect to keyboard configuration.
+
+The read-only transport entry remains restricted to its original four queries.
+A separate native entry accepts only D6 length **9**, offset **0**, profile **0**,
+with bounded stock-effect fields. Bytes 9–21 never enter a setter. Before each
+mutation, a pending record is atomically saved and fsynced. It retains the first
+original capture across colors. Unknown firmware, invalid/mismatched journals,
+off/custom/preset originals, unencodable RGB, concurrent edits and changed
+unowned fields block writes. Pending recovery blocks another color.
+
+Configuration writes are separated by at least one second. D6 must echo the
+payload; bounded D5 reads settle afterwards without repeating an uncertain
+setter. Solid readback accepts only exact requested RGB or its known byte-HSV
+projection, with every other byte exact. Restoration requires the entire saved
+22-byte state. A second payload with inverse RGB encoding is allowed only after
+a successful direct restore ACK and exactly the known HSV projection. Failures
+attempt separate original recovery where safe and retain the record if recovery
+cannot be verified. The record is removed only after exact restoration.
+
+Current probe fields `read_only:true` / `main_write_enabled:false` describe that
+one-shot **query operation**; `hardware-status-air75` separately reports manual
+control availability. They do not enable any desktop follower.
+
+The [phase 2 record](../verification/2026-11-02-air75-v3-main.md) separates real
+configuration readback from optical observation. Flash persistence, sustained
+write frequency, custom palettes, physical unplug/sleep recovery and Windows
+hardware are unverified. Main-light restoration preserves the saved effect
+configuration, not the animation's elapsed phase.
 
 ## Sources and verification
 

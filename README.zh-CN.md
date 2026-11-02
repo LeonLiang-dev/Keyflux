@@ -12,7 +12,7 @@
 
 ## 当前能力
 
-- Air75 V3 ANSI（`19f5:1028`、固件 `1.0.23.6`）新增独立的 macOS USB [只读探测](docs/hardware/air75-v3.md)：`keyflux hardware-probe-air75`。该型号尚未开放灯光写入、恢复或桌面连接。
+- Air75 V3 ANSI（`19f5:1028`、固件 `1.0.23.6`、macOS USB／Mac 档）支持[只读探测和实验性手动主灯控制](docs/hardware/air75-v3.md)，附独立回读和原态精确恢复。该型号的桌面连接、侧灯／逐键控制及 AI 自动跟随尚未开放。
 - P0 任务追踪：待审批／待回答、显式测试与构建结果、逐回合结果确认及 Codex 会话跳转。新增逐状态主灯动作：横向光波、旋转、星点闪烁。验证结果须由真实命令包装器或显式 adapter 提交；新动作待真机验收。参见 [P0 使用说明](docs/P0_WORKFLOWS.md)、[AgentEvent v2](docs/specs/agent-event-v2.md)、[Theme v3](docs/specs/theme-v3.md)。
 - Zig 状态引擎：多会话汇总、工具与审批关联、结束回合的迟到事件隔离。
 - 仅供离线开发测试的模拟键盘：相同写入去重、持久化恢复日志、强制终止后的恢复。

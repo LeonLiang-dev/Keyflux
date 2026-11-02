@@ -1,5 +1,6 @@
 /* Exercise the same native allowlist used immediately before HID output. */
 #include "../native/air75_readonly.h"
+#include "../native/air75_main.h"
 #include <assert.h>
 #include <string.h>
 static void seal(unsigned char frame[64]) {
@@ -44,5 +45,24 @@ int main(void) {
     query(frame, 0xa0, 8, 0, 0);
     frame[3] ^= 1;
     assert(!kf_air75_read_request_allowed(frame, 0));
+    /* Main setters have their own allowlist; the read path still rejects D6. */
+    query(frame, 0xd6, 9, 0, 0x80);
+    unsigned char payload[9] = {3,15,2,0,0,4,128,0,255};
+    for (int i = 0; i < 9; i++) frame[8+i] = payload[i] ^ 0x80;
+    seal(frame);
+    assert(kf_air75_main_request_allowed(frame, 0x80));
+    assert(!kf_air75_read_request_allowed(frame, 0x80));
+    for (unsigned command = 0; command < 256; command++) {
+        frame[1] = command;
+        assert(kf_air75_main_request_allowed(frame, 0x80) == (command == 0xd6));
+    }
+    frame[1] = 0xd6; frame[17] = 1; seal(frame);
+    assert(!kf_air75_main_request_allowed(frame, 0x80));
+    frame[17] = 0; frame[7] = 1 ^ 0x80; seal(frame);
+    assert(!kf_air75_main_request_allowed(frame, 0x80));
+    frame[7] = 0x80; frame[4] = 17 ^ 0x80; seal(frame);
+    assert(!kf_air75_main_request_allowed(frame, 0x80));
+    frame[4] = 9 ^ 0x80; frame[8] = 21 ^ 0x80; seal(frame);
+    assert(!kf_air75_main_request_allowed(frame, 0x80));
     return 0;
 }

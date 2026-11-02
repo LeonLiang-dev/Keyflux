@@ -21,6 +21,8 @@ pub extern fn kf_air75_open() c_int;
 pub extern fn kf_air75_close() void;
 pub extern fn kf_air75_descriptor(out: [*]u8, capacity: usize) c_int;
 pub extern fn kf_air75_exchange(frame: *const [64]u8, reply: *[64]u8, key: u8) c_int;
+pub extern fn kf_air75_write_main(frame: *const [64]u8, reply: *[64]u8, key: u8) c_int;
+pub extern fn kf_air75_identity(out: [*]u8, capacity: usize) c_int;
 pub extern fn kf_kick_open(identity: [*]u8, capacity: usize) c_int;
 pub extern fn kf_kick_close() void;
 pub extern fn kf_kick_descriptor(out: [*]u8, capacity: usize) c_int;

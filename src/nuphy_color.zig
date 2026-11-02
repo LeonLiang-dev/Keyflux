@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Color arithmetic adapted from NuPhy Lab's HIDBridge.swift (MIT).
 // Copyright (c) 2026 NuPhy Lab contributors. See licenses/NuPhyLab-MIT.txt.
-// Pinned reference and Kick75-specific validation: docs/hardware/kick75.md.
+// Pinned reference and device-specific validation: docs/hardware/{kick75,air75-v3}.md.
 const std = @import("std");
 
-/// Candidate byte-HSV model, enabled ONLY for the pinned Kick75 firmware.
+/// Byte-HSV model gated to pinned Kick75/Air75 firmware by their controllers.
 /// Every hardware acknowledgement must still exactly match the predicted D5 RGB.
 pub fn readback(rgb: [3]u8) [3]u8 {
     const r: i32 = rgb[0];

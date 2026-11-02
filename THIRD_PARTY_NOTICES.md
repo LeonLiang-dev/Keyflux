@@ -24,6 +24,12 @@ implementation and transport checks remain in Keyflux's Zig/C layers. See
 [the Air75 protocol record](docs/hardware/air75-v3.md). No third-party source
 is executed by the probe.
 
+Air75 phase 2 reuses the already-attributed byte-HSV and exact inverse-color
+arithmetic for the pinned firmware's manual main-color path. Its independent
+Zig journal and narrow C transport do not incorporate the reference's keymap,
+per-key, side-light or firmware operations. Hardware results and remaining
+limits are recorded in [the phase 2 verification](docs/verification/2026-11-02-air75-v3-main.md).
+
 ## NuPhy IO preview artwork
 
 The Tauri development preview uses NuPhy IO's original Kick75 housing/knob WebP files, segmented SVG key outlines and literal SVG sprite symbols. Source URLs and SHA-256 digests are recorded in `desktop/reference-assets.json`. Downloaded artwork lives in the Git-ignored `desktop/public/reference/` local cache. The fetcher parses static literals and never executes third-party JavaScript. Geometry/legends come from the user-supplied DOM; no account data is retained.

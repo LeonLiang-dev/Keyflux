@@ -11,16 +11,38 @@
     "report_bytes": 64,
     "interface_number": 3
   },
-  "firmware": { "family": "nuphy-io-s4", "versions": ["1.0.23.6"] },
-  "verified_on": [],
+  "firmware": {
+    "family": "nuphy-io-s4",
+    "versions": [
+      "1.0.23.6"
+    ]
+  },
+  "verified_on": [
+    {
+      "platform": "macos",
+      "architecture": "aarch64",
+      "firmware": "1.0.23.6",
+      "profile": "mac",
+      "transport": "usb",
+      "zone": "main",
+      "evidence": [
+        "docs/evidence/air75-v3-main-20261102.json",
+        "docs/verification/2026-11-02-air75-v3-main.md"
+      ]
+    }
+  ],
   "layout": null,
   "capabilities": {
-    "solid_main": false,
+    "solid_main": true,
     "per_key": false,
-    "readback": false,
-    "restore": false,
+    "readback": true,
+    "restore": true,
     "max_frames_per_second": 0
   },
-  "verification": "recognized",
-  "evidence": ["docs/hardware/air75-v3.md"]
+  "verification": "experimental",
+  "evidence": [
+    "docs/hardware/air75-v3.md",
+    "docs/evidence/air75-v3-main-20261102.json",
+    "docs/verification/2026-11-02-air75-v3-main.md"
+  ]
 }
