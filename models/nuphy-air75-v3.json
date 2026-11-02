@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "nuphy-air75-v3",
+  "name": "NuPhy Air75 V3 ANSI",
+  "protocol": "nuphy_io_s4",
+  "usb": {
+    "vendor_id": 6645,
+    "product_id": 4136,
+    "usage_page": 1,
+    "usage": 0,
+    "report_bytes": 64,
+    "interface_number": 3
+  },
+  "firmware": { "family": "nuphy-io-s4", "versions": ["1.0.23.6"] },
+  "verified_on": [],
+  "layout": null,
+  "capabilities": {
+    "solid_main": false,
+    "per_key": false,
+    "readback": false,
+    "restore": false,
+    "max_frames_per_second": 0
+  },
+  "verification": "recognized",
+  "evidence": ["docs/hardware/air75-v3.md"]
+}

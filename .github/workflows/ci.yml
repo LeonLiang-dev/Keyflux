@@ -23,6 +23,7 @@ jobs:
       - run: python tests/integration.py zig-out/bin/keyflux${{ runner.os == 'Windows' && '.exe' || '' }}
       - run: python tests/workflow.py zig-out/bin/keyflux${{ runner.os == 'Windows' && '.exe' || '' }}
       - run: zig-out/bin/keyflux${{ runner.os == 'Windows' && '.exe' || '' }} validate-model models/nuphy-kick75-io.json
+      - run: zig-out/bin/keyflux${{ runner.os == 'Windows' && '.exe' || '' }} validate-model models/nuphy-air75-v3.json
       - run: zig-out/bin/keyflux${{ runner.os == 'Windows' && '.exe' || '' }} validate-theme examples/theme.json
       - run: zig-out/bin/keyflux${{ runner.os == 'Windows' && '.exe' || '' }} validate-theme examples/theme-v2.json
       - run: zig-out/bin/keyflux${{ runner.os == 'Windows' && '.exe' || '' }} validate-theme examples/theme-v3.json

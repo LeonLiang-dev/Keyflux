@@ -16,6 +16,7 @@ pub fn build(b: *std.Build) void {
     const mod = b.createModule(.{ .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize, .link_libc = true });
     mod.addCSourceFile(.{ .file = b.path("native/platform.c"), .flags = &.{ "-std=c11", "-Wall", "-Wextra" } });
     mod.addCSourceFile(.{ .file = b.path("native/kick75.c"), .flags = &.{ "-std=c11", "-Wall", "-Wextra" } });
+    mod.addCSourceFile(.{ .file = b.path("native/air75.c"), .flags = &.{ "-std=c11", "-Wall", "-Wextra" } });
     mod.addIncludePath(b.path("vendor/hidapi/hidapi"));
     mod.addIncludePath(b.path("vendor/hidapi/mac"));
     switch (target.result.os.tag) {
@@ -43,5 +44,9 @@ pub fn build(b: *std.Build) void {
     run.addPassthruArgs();
     b.step("run", "Run Keyflux").dependOn(&run.step);
     const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("src/tests.zig"), .target = target, .optimize = optimize }) });
-    b.step("test", "Run portable core and contract tests").dependOn(&b.addRunArtifact(tests).step);
+    const test_step = b.step("test", "Run portable core, contract and native query boundary tests");
+    test_step.dependOn(&b.addRunArtifact(tests).step);
+    const native_tests = b.addExecutable(.{ .name = "air75-readonly-test", .root_module = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true }) });
+    native_tests.root_module.addCSourceFile(.{ .file = b.path("tests/air75_readonly.c"), .flags = &.{ "-std=c11", "-Wall", "-Wextra", "-UNDEBUG" } });
+    test_step.dependOn(&b.addRunArtifact(native_tests).step);
 }

@@ -18,6 +18,12 @@ The core, transport wrapper and S4 codec are independently implemented. The colo
 
 NuPhy, Codex, ChatGPT, Claude and DeepSeek remain names of their respective owners. Integration does not imply endorsement.
 
+Air75 V3 phase 1 protocol research additionally consults the same pinned MIT
+`HIDBridge.swift` for firmware routing and the 22-byte read-only snapshot format;
+implementation and transport checks remain in Keyflux's Zig/C layers. See
+[the Air75 protocol record](docs/hardware/air75-v3.md). No third-party source
+is executed by the probe.
+
 ## NuPhy IO preview artwork
 
 The Tauri development preview uses NuPhy IO's original Kick75 housing/knob WebP files, segmented SVG key outlines and literal SVG sprite symbols. Source URLs and SHA-256 digests are recorded in `desktop/reference-assets.json`. Downloaded artwork lives in the Git-ignored `desktop/public/reference/` local cache. The fetcher parses static literals and never executes third-party JavaScript. Geometry/legends come from the user-supplied DOM; no account data is retained.

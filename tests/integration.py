@@ -127,6 +127,19 @@ class RuntimeTest(unittest.TestCase):
         self.assertFalse((self.directory / "kick75-recovery.json").exists())
         self.assertEqual(self.status()["backend"], "simulated")
 
+    def test_air75_probe_options_reject_before_hid_and_model_stays_recognized(self):
+        for args in [("--state-dir", str(self.directory)), ("extra",), ("--simulate",), ("--otlp-port", "4318"), ("--expect-device", "a" * 64)]:
+            result = subprocess.run([EXE, "hardware-probe-air75", *args], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(json.loads(result.stdout)["code"], "UnexpectedArgument")
+        model = Path(__file__).resolve().parents[1] / "models/nuphy-air75-v3.json"
+        self.call("validate-model", str(model))
+        metadata = json.loads(model.read_text())
+        self.assertEqual(metadata["verification"], "recognized")
+        self.assertEqual(metadata["verified_on"], [])
+        self.assertTrue(all(not value for value in metadata["capabilities"].values()))
+        self.assertFalse((self.directory / "air75-recovery.json").exists())
+
     def test_theme_v2_side_configuration_roundtrips_without_hardware_enable(self):
         theme = json.loads(self.call("theme-get").stdout)["theme"]
         self.assertEqual(theme["schema_version"], 1)

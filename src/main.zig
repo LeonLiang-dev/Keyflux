@@ -7,6 +7,7 @@ const devices = @import("device.zig");
 const codex = @import("codex.zig");
 const otlp = @import("otlp.zig");
 const kick75 = @import("kick75.zig");
+const air75 = @import("air75.zig");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const max_request = 512 * 1024;
@@ -14,6 +15,7 @@ const usage =
     \\Keyflux 0.1.0-dev — internal validation build
     \\  keyflux diagnose                       Read-only NuPhy HID inventory
     \\  keyflux hardware-probe                 Read-only Kick75 firmware / light state
+    \\  keyflux hardware-probe-air75           Read-only Air75 V3 ANSI 1.0.23.6 snapshot
     \\  keyflux hardware-status                Read-only device + durable recovery status
     \\  keyflux hardware-solid '#00FFFF' 15    Manual main-light color; durable capture
     \\  keyflux hardware-effect                Main-zone native action JSON on stdin
@@ -406,6 +408,11 @@ fn run(init: std.process.Init) !void {
         const n = p.kf_hid_diagnose(buffer.ptr, buffer.len);
         if (n < 0) return error.HidEnumerationFailed;
         p.kf_print(buffer.ptr, @intCast(n), 0);
+        return;
+    }
+    if (eq(command, "hardware-probe-air75")) {
+        if (directory != null or simulate or port != 0 or expected_device != null or positional.items.len != 1) return error.UnexpectedArgument;
+        try output(a, try air75.probe());
         return;
     }
     if (eq(command, "hardware-status")) {
