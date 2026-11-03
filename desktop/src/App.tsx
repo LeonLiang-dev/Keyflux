@@ -146,8 +146,15 @@ export function App() {
   }, [dirty]);
   const live = status?.result.state.phase;
   const air75 = device.model_id === 'nuphy-air75-v3';
-  const displayed =
-    air75 || previewing ? phase : phases.includes(live as Phase) ? (live as Phase) : null;
+  const displayed = previewing ? phase : phases.includes(live as Phase) ? (live as Phase) : null;
+  const liveAir75Color =
+    status?.result.backend === 'read-only' && displayed ? (status.result.lighting ?? null) : null;
+  const mainPreview =
+    device.connected && displayed
+      ? air75 && !previewing
+        ? liveAir75Color
+        : theme.signals[displayed]
+      : null;
   const editPhase = phase;
   const signal =
     zone === 'main' || theme.side.mode === 'follow_main'
@@ -197,7 +204,10 @@ export function App() {
         const next = await command<Device>('connect_device', { model: requested });
         setDeviceChoices(next.choices ?? []);
         setDevice(next);
-        if (next.model_id === 'nuphy-air75-v3') setZone('main');
+        if (next.model_id === 'nuphy-air75-v3') {
+          setZone('main');
+          setPreviewing(false);
+        }
       }
     });
   const testAir75 = (restore = false) =>
@@ -259,7 +269,7 @@ export function App() {
         <div className="keyboard-canvas">
           <KeyboardPreview
             model={model}
-            main={device.connected && displayed ? theme.signals[displayed] : null}
+            main={mainPreview}
             action={!air75 && device.connected && displayed ? theme.actions[displayed] : undefined}
             strip={!air75 && device.connected && displayed ? sideSignal(theme, displayed) : null}
           />
@@ -380,7 +390,9 @@ export function App() {
                       {previewing
                         ? '配色预览'
                         : displayed
-                          ? labels[displayed]
+                          ? air75
+                            ? `实时预览 · ${labels[displayed]}`
+                            : labels[displayed]
                           : live === 'idle'
                             ? '空闲'
                             : '状态不可用'}
@@ -438,6 +450,9 @@ export function App() {
                   <div className="effect-controls">
                     <span className="phase-caption">常亮 · 亮度上限 15%，测试后自动恢复</span>
                     <div className="actions">
+                      <button disabled={busy || !previewing} onClick={() => setPreviewing(false)}>
+                        实时预览
+                      </button>
                       {device.recovery_required ? (
                         <button
                           disabled={busy || !device.can_restore}

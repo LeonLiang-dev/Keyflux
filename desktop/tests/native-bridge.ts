@@ -55,6 +55,9 @@ export async function installBridge(page: Page, failConnect = false, bothModels 
         isTauri: true,
         __testBridge: {
           calls,
+          phase: (value: string) => {
+            state.state.phase = value;
+          },
           unplug: () => {
             device = {
               connected: false,
@@ -70,7 +73,11 @@ export async function installBridge(page: Page, failConnect = false, bothModels 
             switch (name) {
               case 'get_status':
                 return {
-                  result: { ...state, lighting: currentTheme.signals.thinking },
+                  result: {
+                    ...state,
+                    lighting:
+                      currentTheme.signals[state.state.phase as keyof typeof theme.signals] ?? null,
+                  },
                   tasks: structuredClone(tasks),
                   desktop: { hardware_writes: false, core_owned: false, instance_id: 'test' },
                 };

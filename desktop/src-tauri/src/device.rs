@@ -1,7 +1,13 @@
 use crate::core::Core;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::sync::Mutex;
+use std::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
+
+// Software pacing for Air75 qualification. This interval is not a flash endurance claim.
+const AIR75_FOLLOW_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub enum Model {
@@ -31,6 +37,16 @@ pub trait Hardware {
     fn inspect(&self) -> Result<Value, String>;
     fn apply(&self, signal: &Value, identity: &str) -> Result<Value, String>;
     fn restore(&self, identity: &str) -> Result<Value, String>;
+    fn can_follow(&self, model: Model) -> bool {
+        // Air75 1.0.23.6 can persist D6 RGB changes to Data Flash.
+        model == Model::Kick75
+    }
+    fn apply_model(&self, model: Model, signal: &Value, identity: &str) -> Result<Value, String> {
+        match model {
+            Model::Kick75 => self.apply(signal, identity),
+            Model::Air75 => Err("UnsupportedDevice".into()),
+        }
+    }
     fn inspect_model(&self, model: Model) -> Result<Value, String> {
         match model {
             Model::Kick75 => self.inspect(),
@@ -92,6 +108,7 @@ struct Session {
     following: bool,
     follow_error: Option<String>,
     last_signal: Option<Value>,
+    last_air75_mutation: Option<Instant>,
 }
 #[derive(Default)]
 pub struct Device {
@@ -293,14 +310,14 @@ fn apply_locked(
         return Err("RecoveryRequired".into());
     }
     let identity = session.identity.as_deref().ok_or("InvalidDeviceIdentity")?;
-    let result = match hardware.apply(signal, identity) {
+    let result = match hardware.apply_model(session.model, signal, identity) {
         Ok(result) => result,
         Err(error) => {
             let _ = refresh(session, hardware);
             return Err(error);
         }
     };
-    if !bytes(&result["state"], 17) {
+    if !bytes(&result["state"], session.model.state_len()) {
         return Err("InvalidDeviceReply".into());
     }
     if result["changed"] == true {
@@ -324,7 +341,7 @@ impl Device {
         if session.probe.is_none() {
             return Err("NotConnected".into());
         }
-        if session.model == Model::Air75 {
+        if !core.can_follow(session.model) {
             session.following = false;
             return Ok(public(&session));
         }
@@ -339,7 +356,7 @@ impl Device {
     }
     pub fn follow_core(&self, core: &Core) {
         let active = self.session.lock().is_ok_and(|s| {
-            s.model == Model::Kick75
+            core.can_follow(s.model)
                 && s.following
                 && s.probe.as_ref().is_some_and(writable)
                 && !s.closing
@@ -355,8 +372,17 @@ impl Device {
         hardware: &impl Hardware,
         status: Option<&Value>,
     ) -> Result<(), String> {
+        self.follow_status_at(hardware, status, Instant::now())
+    }
+
+    fn follow_status_at(
+        &self,
+        hardware: &impl Hardware,
+        status: Option<&Value>,
+        now: Instant,
+    ) -> Result<(), String> {
         let mut session = self.session.lock().map_err(|_| "DeviceLockFailed")?;
-        if session.model != Model::Kick75
+        if !hardware.can_follow(session.model)
             || session.closing
             || !session.following
             || session.probe.is_none()
@@ -377,14 +403,32 @@ impl Device {
                                 .get("lighting")
                                 .filter(|s| !s.is_null())
                                 .ok_or("InvalidAgentStatus")?;
-                            let mut intent = signal.clone();
-                            if let Some(action) =
-                                status["result"].get("action").filter(|a| !a.is_null())
-                            {
-                                intent["effect"] = action["effect"].clone();
-                                intent["speed"] = action["speed"].clone();
+                            if session.model == Model::Air75 {
+                                let color = signal["color"]
+                                    .as_str()
+                                    .filter(|c| {
+                                        c.len() == 7
+                                            && c.starts_with('#')
+                                            && c.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)
+                                    })
+                                    .ok_or("InvalidSignal")?;
+                                let brightness = signal["brightness"]
+                                    .as_u64()
+                                    .filter(|v| *v <= 100)
+                                    .ok_or("InvalidSignal")?;
+                                Some(
+                                    json!({"color": color.to_ascii_uppercase(), "brightness": brightness}),
+                                )
+                            } else {
+                                let mut intent = signal.clone();
+                                if let Some(action) =
+                                    status["result"].get("action").filter(|a| !a.is_null())
+                                {
+                                    intent["effect"] = action["effect"].clone();
+                                    intent["speed"] = action["speed"].clone();
+                                }
+                                Some(intent)
                             }
-                            Some(intent)
                         }
                         _ => return Err("InvalidAgentStatus".into()),
                     }
@@ -396,9 +440,22 @@ impl Device {
                 return Ok(());
             }
             if let Some(signal) = &signal {
-                apply_locked(&mut session, hardware, "nuphy-kick75-io", signal)?;
+                let model = session.model;
+                if model == Model::Air75 {
+                    if session.last_air75_mutation.is_some_and(|last| {
+                        now.saturating_duration_since(last) < AIR75_FOLLOW_INTERVAL
+                    }) {
+                        // The next poll supplies the latest state. Never queue a stale color.
+                        return Ok(());
+                    }
+                    session.last_air75_mutation = Some(now);
+                }
+                apply_locked(&mut session, hardware, model.id(), signal)?;
             } else if session.restore_owned {
                 restore_locked(&mut session, hardware)?;
+                if session.model == Model::Air75 {
+                    session.last_air75_mutation = Some(now);
+                }
             }
             session.last_signal = signal;
             Ok(())
@@ -609,6 +666,95 @@ mod tests {
         device.start_following(&hardware).unwrap();
         assert!(!device.session.lock().unwrap().following);
         assert!(hardware.calls.lock().unwrap().is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn air75_qualification_coalesces_colors_and_restores_on_source_loss() {
+        struct AirMock {
+            probe: Value,
+            writes: Mutex<Vec<Value>>,
+            restores: Mutex<usize>,
+        }
+        impl Hardware for AirMock {
+            fn inspect(&self) -> Result<Value, String> {
+                unreachable!()
+            }
+            fn apply(&self, _: &Value, _: &str) -> Result<Value, String> {
+                unreachable!()
+            }
+            fn restore(&self, _: &str) -> Result<Value, String> {
+                unreachable!()
+            }
+            fn can_follow(&self, model: Model) -> bool {
+                model == Model::Air75
+            }
+            fn apply_model(
+                &self,
+                model: Model,
+                signal: &Value,
+                identity: &str,
+            ) -> Result<Value, String> {
+                assert!(model == Model::Air75);
+                assert_eq!(identity, "a".repeat(64));
+                self.writes.lock().unwrap().push(signal.clone());
+                Ok(json!({"changed":true,"state":self.probe["state"]}))
+            }
+            fn restore_model(&self, model: Model, identity: &str) -> Result<Value, String> {
+                assert!(model == Model::Air75);
+                assert_eq!(identity, "a".repeat(64));
+                *self.restores.lock().unwrap() += 1;
+                Ok(json!({"restored":true,"state":self.probe["state"]}))
+            }
+        }
+        let mut probe: Value = serde_json::from_str::<Value>(include_str!(
+            "../../../docs/evidence/air75-v3-readonly-20261102.json"
+        ))
+        .unwrap()["probe"]
+            .clone();
+        probe["fingerprint"] = json!("a".repeat(64));
+        let hardware = AirMock {
+            probe: probe.clone(),
+            writes: Mutex::default(),
+            restores: Mutex::default(),
+        };
+        let device = Device {
+            session: Mutex::new(Session {
+                model: Model::Air75,
+                probe: Some(probe),
+                identity: Some("a".repeat(64)),
+                ..Session::default()
+            }),
+        };
+        device.start_following(&hardware).unwrap();
+        let start = Instant::now();
+        let tick = |seconds, status: Option<&Value>| {
+            device
+                .follow_status_at(&hardware, status, start + Duration::from_secs(seconds))
+                .unwrap();
+        };
+        let mut working = agent_status("working", "#00ffff");
+        working["result"]["action"] = json!({"effect":"orbit","speed":2});
+        tick(0, Some(&working));
+        tick(1, Some(&agent_status("tool", "#00FFFF")));
+        tick(2, Some(&agent_status("attention", "#FFAA00")));
+        tick(5, Some(&agent_status("complete", "#00FF00")));
+        assert_eq!(
+            *hardware.writes.lock().unwrap(),
+            vec![
+                json!({"color":"#00FFFF","brightness":15}),
+                json!({"color":"#00FF00","brightness":15}),
+            ]
+        );
+        tick(6, None);
+        tick(7, None);
+        assert_eq!(*hardware.restores.lock().unwrap(), 1);
+        tick(8, Some(&working));
+        assert_eq!(hardware.writes.lock().unwrap().len(), 2);
+        tick(11, Some(&working));
+        assert_eq!(hardware.writes.lock().unwrap().len(), 3);
+        device.disconnect(&hardware).unwrap();
+        assert_eq!(*hardware.restores.lock().unwrap(), 2);
     }
 
     struct Fake {

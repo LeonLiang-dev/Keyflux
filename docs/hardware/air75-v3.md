@@ -34,6 +34,39 @@ The test retains the capture if the device disappears or its configuration
 changes during the hold. Reconnect the original keyboard at the same USB port
 to recover. Air75 connection is read-only until a test or recovery is requested.
 
+## Live preview and follow qualification
+
+The preview shows the current core-resolved color. Selecting or editing a
+phase shows its draft instead. **实时预览** returns to the live view, which
+clears the active color when the source becomes unavailable or idle.
+
+Software qualification uses a mock Air75 transport to exercise the native
+follow policy. It coalesces repeated colors, takes the latest intent when the
+five-second interval elapses, and prioritizes restoration on idle, source
+loss or disconnect. This interval is a software test parameter. The physical
+Air75 follow gate remains closed. Offline inspection of the official ANSI
+`1.0.23.6` image (SHA-256
+`d2b39152a6bd02804044e9fef2bc400b9cfa7b7b7156bae048f76bf6c4fd4a66`) found a
+Data Flash path reachable from the D6 main RGB setter:
+
+- The opcode dispatch table at file offset `0x44450`, indexed by
+  `opcode - 0x2f`, sends D6 to `0x15ee0`. Its active profile branch calls
+  the lighting setter at `0x151b4`.
+- The active main field table at `0x44408` routes RGB offset 6 to `0x1523c`.
+  This path calls `0x25ca` with an 18-byte configuration block, then reaches
+  `0x13918`.
+- That routine calls one storage entry with operation `0x0b` at `0x13986`
+  and `0x0a` at `0x139bc`. A conditional page rewrite path uses `0x09`
+  at `0x13a16` followed by `0x0a` at `0x13a28`. These are the WCH SDK
+  Data Flash read, write and erase operation codes.
+
+This is static evidence of a reachable persistence path for D6, with no
+measured erase frequency or endurance estimate. The same firmware's D8
+palette path also has an idle persistence task, as documented by NuPhy Lab.
+[Official image](https://cdn.nuphy.io/image/2026/10/15/d12ab108a72c4328a1c51f49e6a200b3.zip)
+[WCH SDK definitions](https://github.com/openwch/ch583/blob/main/EVT/EXAM/SRC/StdPeriphDriver/inc/ISP583.h)
+[NuPhy Lab protocol](https://github.com/NuPhyLab/Air75-V3-RGB-Lab/blob/9bd300bc6f7eaaad8f766a1a6ef752bbf530088d/native/PROTOCOL.md)
+
 ## Query contract
 
 Only USB `19f5:1028`, usage page 1 / usage 0, interface 3 is selected. The HID
@@ -112,9 +145,8 @@ one-shot **query operation**; `hardware-status-air75` separately reports manual
 control availability. They do not enable any desktop follower.
 
 The [phase 2 record](../verification/2026-11-02-air75-v3-main.md) separates real
-configuration readback from optical observation. Flash persistence, sustained
-write frequency, custom palettes, physical unplug/sleep recovery and Windows
-hardware are unverified. Main-light restoration preserves the saved effect
+configuration readback from optical observation. Physical power-cycle persistence, sustained write frequency, custom palettes,
+physical unplug/sleep recovery and Windows hardware are unverified. Main-light restoration preserves the saved effect
 configuration, not the animation's elapsed phase.
 
 ## Sources and verification

@@ -282,4 +282,16 @@ test('Air75 selection binds the preview and only the explicit action tests its m
   await page.getByRole('button', { name: '测试主灯', exact: true }).click();
   await expect(page.locator('.feedback')).toContainText('原灯效已恢复');
   expect(await countTests()).toBe(1);
+  await expect(page.locator('.phase-caption').filter({ hasText: '配色预览' })).toBeVisible();
+  await page.getByRole('button', { name: '实时预览', exact: true }).click();
+  await expect(
+    page.locator('.phase-caption').filter({ hasText: '实时预览 · Thinking' }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    (window as unknown as { __testBridge: { phase: (value: string) => void } }).__testBridge.phase(
+      'idle',
+    );
+  });
+  await expect(page.locator('.keyboard')).toHaveCSS('--light-color', '#55575a');
+  expect(await countTests()).toBe(1);
 });
