@@ -25,7 +25,7 @@ const errorText = (error: unknown) => {
     (
       {
         Kick75NotFound: '未找到 Kick75，请检查 USB 连接',
-        DeviceNotFound: '未找到 Kick75，请检查 USB 连接',
+        DeviceNotFound: '未找到支持的键盘，请检查 USB 连接',
         HidOpenFailed: '键盘被其他灯控程序占用',
         NotConnected: '请先连接键盘',
         RecoveryRequired: '灯效恢复待完成，请重新连接原键盘',
@@ -37,12 +37,17 @@ const errorText = (error: unknown) => {
         DeviceBusy: '设备忙碌，等待重新读取',
         DeviceDisconnected: '键盘已断开，等待原设备重新接入',
         HidTimeout: '键盘响应超时，请检查 USB 或其他灯控程序',
-        MultipleDevices: '检测到多把 Kick75，请只保留一把 USB 连接',
+        MultipleDevices: '检测到多把同型号键盘，请只保留一把 USB 连接',
         RecoveryIdentityMismatch: '恢复记录属于其他设备，请接回原键盘与原 USB 端口',
         InvalidRecoveryRecord: '恢复记录损坏，已阻止写入，请保留记录进行诊断',
         UnsupportedOriginalEffect: '当前原灯效尚不支持可靠恢复，请先在键盘上切换灯效',
         RestoreColorUnrepresentable: '当前原灯效颜色无法精确恢复，已阻止写入',
         UnverifiedFirmwareOrGeometry: '当前固件尚未通过灯控验证',
+        UnverifiedAir75Firmware: '当前 Air75 V3 固件尚未通过灯控验证',
+        UnverifiedAir75Geometry: '当前 Air75 V3 布局尚未通过灯控验证',
+        UnverifiedAir75LedCount: '当前 Air75 V3 灯位数量与已验证设备不符',
+        UnownedLightingChanged: '检测到其他灯区配置变化，已保留恢复记录',
+        CoreTimeout: '键盘操作超时，请检查连接及恢复状态',
         UnverifiedProfile: '请将键盘切换至 Mac 档后重新连接',
       } as Record<string, string>
     )[code] ?? code
@@ -59,8 +64,10 @@ export function App() {
     [busy, setBusy] = useState(false);
   const [error, setError] = useState(''),
     [connectionError, setConnectionError] = useState('');
-  const [model, setModel] = useState(layouts[0].id),
-    [phase, setPhase] = useState<Phase>('working');
+  const [notice, setNotice] = useState('');
+  const [deviceChoices, setDeviceChoices] = useState<string[]>([]);
+  const [phase, setPhase] = useState<Phase>('working');
+  const model = device.model_id ?? layouts[0].id;
   const [previewing, setPreviewing] = useState(false);
   const [zone, setZone] = useState<'main' | 'side' | 'tasks'>('main');
   const dirty = JSON.stringify(theme) !== JSON.stringify(saved);
@@ -138,7 +145,9 @@ export function App() {
     return () => window.removeEventListener('beforeunload', guard);
   }, [dirty]);
   const live = status?.result.state.phase;
-  const displayed = previewing ? phase : phases.includes(live as Phase) ? (live as Phase) : null;
+  const air75 = device.model_id === 'nuphy-air75-v3';
+  const displayed =
+    air75 || previewing ? phase : phases.includes(live as Phase) ? (live as Phase) : null;
   const editPhase = phase;
   const signal =
     zone === 'main' || theme.side.mode === 'follow_main'
@@ -162,6 +171,7 @@ export function App() {
     ++deviceRevision.current;
     setBusy(true);
     setError('');
+    setNotice('');
     try {
       await task();
     } catch (e) {
@@ -177,31 +187,36 @@ export function App() {
       setBusy(false);
     }
   };
-  const connect = () =>
+  const connect = (requested?: string) =>
     void run(async () => {
       if (device.connected) {
         await command('disconnect_device');
+        setDeviceChoices([]);
         setDevice(disconnected);
       } else {
-        const next = await command<Device>('connect_device');
+        const next = await command<Device>('connect_device', { model: requested });
+        setDeviceChoices(next.choices ?? []);
         setDevice(next);
-        if (next.model_id) setModel(next.model_id);
+        if (next.model_id === 'nuphy-air75-v3') setZone('main');
       }
+    });
+  const testAir75 = (restore = false) =>
+    void run(async () => {
+      setNotice(restore ? '正在恢复原灯效…' : '正在测试主灯…');
+      const next = await command<Device>('air75_action', {
+        signal: restore ? null : { color: signal.color, brightness: signal.brightness },
+      });
+      setDevice(next);
+      if (restore) setNotice(next.restored ? '原灯效已恢复' : '当前没有待恢复灯效');
+      else setNotice(next.tested ? '原灯效已恢复' : '主灯已是该测试颜色');
     });
   const locked = zone === 'side' && (!theme.side.enabled || theme.side.mode === 'follow_main');
   return (
     <main className="app-shell">
       <header className="toolbar">
-        <Select
-          label="键盘型号"
-          disabled={!device.connected || busy}
-          value={model}
-          onChange={setModel}
-          options={layouts.map((l) => ({
-            value: l.id,
-            label: l.name + (l.preview_only ? ' · 布局样例' : ''),
-          }))}
-        />
+        <span className="connection" aria-label="键盘型号">
+          {device.connected ? layouts.find((layout) => layout.id === model)?.name : '键盘型号'}
+        </span>
         <div className="toolbar-right">
           <span
             className={`connection ${device.connected ? 'online' : ''}`}
@@ -210,7 +225,7 @@ export function App() {
             <i />
             {device.connected ? (device.writable ? 'USB 已连接' : 'USB 只读') : '未连接'}
           </span>
-          <button className="connect-button" disabled={busy || !ready} onClick={connect}>
+          <button className="connect-button" disabled={busy || !ready} onClick={() => connect()}>
             {device.connected ? '断开' : '连接键盘'}
           </button>
           <MoreMenu
@@ -245,8 +260,8 @@ export function App() {
           <KeyboardPreview
             model={model}
             main={device.connected && displayed ? theme.signals[displayed] : null}
-            action={device.connected && displayed ? theme.actions[displayed] : undefined}
-            strip={device.connected && displayed ? sideSignal(theme, displayed) : null}
+            action={!air75 && device.connected && displayed ? theme.actions[displayed] : undefined}
+            strip={!air75 && device.connected && displayed ? sideSignal(theme, displayed) : null}
           />
         </div>
       </section>
@@ -259,8 +274,17 @@ export function App() {
             <path d="M16 4h2v2h-2z" />
           </svg>
           <h2>连接你的键盘</h2>
-          <p>将 Kick75 接入 USB 并切至 Mac 档，然后点击连接。</p>
-          <button className="primary" disabled={!ready || busy} onClick={connect}>
+          <p>将 Kick75 或 Air75 V3 接入 USB 并切至 Mac 档。</p>
+          {deviceChoices.length ? (
+            <div className="actions" aria-label="选择要连接的键盘">
+              {deviceChoices.map((id) => (
+                <button key={id} disabled={busy} onClick={() => connect(id)}>
+                  {layouts.find((layout) => layout.id === id)?.name ?? id}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <button className="primary" disabled={!ready || busy} onClick={() => connect()}>
             {busy ? '正在连接…' : '连接 USB 键盘'}
           </button>
         </section>
@@ -274,13 +298,15 @@ export function App() {
               </svg>
               主键区
             </button>
-            <button className={zone === 'side' ? 'active' : ''} onClick={() => setZone('side')}>
-              <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="3" y="8" width="18" height="8" rx="2" />
-                <path d="M7 11v2m5-2v2m5-2v2" />
-              </svg>
-              条形灯
-            </button>
+            {!air75 && (
+              <button className={zone === 'side' ? 'active' : ''} onClick={() => setZone('side')}>
+                <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3" y="8" width="18" height="8" rx="2" />
+                  <path d="M7 11v2m5-2v2m5-2v2" />
+                </svg>
+                条形灯
+              </button>
+            )}
             <button className={zone === 'tasks' ? 'active' : ''} onClick={() => setZone('tasks')}>
               任务
             </button>
@@ -361,7 +387,7 @@ export function App() {
                     </span>
                   )}
                 </div>
-                {zone === 'main' && (
+                {zone === 'main' && !air75 && (
                   <div className="effect-controls">
                     <Select
                       label="灯光动作"
@@ -408,6 +434,28 @@ export function App() {
                     )}
                   </div>
                 )}
+                {air75 && (
+                  <div className="effect-controls">
+                    <span className="phase-caption">常亮 · 亮度上限 15%，测试后自动恢复</span>
+                    <div className="actions">
+                      {device.recovery_required ? (
+                        <button
+                          disabled={busy || !device.can_restore}
+                          onClick={() => testAir75(true)}
+                        >
+                          恢复原灯效
+                        </button>
+                      ) : (
+                        <button
+                          disabled={busy || !device.writable || signal.brightness === 0}
+                          onClick={() => testAir75()}
+                        >
+                          测试主灯
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <ColorPicker
                   value={signal.color}
                   disabled={!ready || busy || locked}
@@ -442,6 +490,8 @@ export function App() {
             <span className="error">
               {error || connectionError || errorText(device.last_error)}
             </span>
+          ) : notice ? (
+            notice
           ) : dirty ? (
             '未保存'
           ) : status?.desktop.source?.available ? (
@@ -453,25 +503,27 @@ export function App() {
             'Codex 状态暂不可用'
           ) : null}
         </div>
-        <label className="hold">
-          完成保持
-          <input
-            type="number"
-            aria-label="完成色保持秒数"
-            disabled={!device.connected || busy}
-            min="1"
-            max="60"
-            value={theme.completion_hold_ms / 1000}
-            onChange={(e) => {
-              if (Number.isFinite(e.target.valueAsNumber))
-                setTheme({
-                  ...theme,
-                  completion_hold_ms: Math.round(e.target.valueAsNumber * 1000),
-                });
-            }}
-          />
-          秒
-        </label>
+        {!air75 && (
+          <label className="hold">
+            完成保持
+            <input
+              type="number"
+              aria-label="完成色保持秒数"
+              disabled={!device.connected || busy}
+              min="1"
+              max="60"
+              value={theme.completion_hold_ms / 1000}
+              onChange={(e) => {
+                if (Number.isFinite(e.target.valueAsNumber))
+                  setTheme({
+                    ...theme,
+                    completion_hold_ms: Math.round(e.target.valueAsNumber * 1000),
+                  });
+              }}
+            />
+            秒
+          </label>
+        )}
         <div className="actions">
           <button
             disabled={!ready || !device.connected || busy}

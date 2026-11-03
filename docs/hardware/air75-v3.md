@@ -3,7 +3,8 @@
 The read-only probe and separate manual main-light commands target wired USB
 Air75 V3 ANSI, firmware **1.0.23.6**, macOS / Mac profile. The descriptor is
 `experimental`. Manual main-color readback and exact original-state restoration
-passed; desktop connection, AI following, side and per-key setters are not enabled.
+passed. The desktop app offers explicit, short main-light tests. Air75 AI
+following, side and per-key control are outside the current desktop scope.
 
 ## Usage
 
@@ -18,6 +19,20 @@ Use wired mode and close/disconnect other HID configurators such as NuPhy IO.
 The command opens non-exclusively, rejects runtime flags and extra arguments,
 and does not initialize runtime state or modify recovery records. An ephemeral
 per-user lock coordinates Keyflux probes, not third-party clients.
+
+## Desktop connection and color test
+
+Start the app with `./scripts/dev-macos.sh` and click **连接键盘**. If both
+supported models are present, select the device to connect. An Air75 session
+shows the connected model and its ANSI layout. Editing and saving a palette
+update the preview and theme. **测试主灯** applies the selected color at up to
+15% brightness, holds it for three seconds and restores the saved configuration.
+The core holds the device lock throughout this test.
+
+If a compatible recovery capture exists, **恢复原灯效** is available instead.
+The test retains the capture if the device disappears or its configuration
+changes during the hold. Reconnect the original keyboard at the same USB port
+to recover. Air75 connection is read-only until a test or recovery is requested.
 
 ## Query contract
 
@@ -50,8 +65,8 @@ profile, LED count, USB/report shape and all lighting bytes. Session/reserved
 trailing A1/A0 bytes, derived key, serial, USB path and location ID are omitted.
 `read_only:true` and `main_write_enabled:false` are always present.
 
-Kick75's command, write gates, routing and journal stay separate. Air75's
-keyboard layout stays `preview_only` and outside the desktop catalog.
+Each desktop session binds to the detected model and USB identity. The Air75
+ANSI layout provides a screen preview. It contains no physical LED mapping.
 
 ## Manual main lighting and recovery
 

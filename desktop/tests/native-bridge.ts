@@ -2,9 +2,9 @@ import type { Page } from '@playwright/test';
 import { defaultTheme } from '../src/theme';
 
 // Test-only Tauri boundary injection. No mock transport is shipped in src/.
-export async function installBridge(page: Page, failConnect = false) {
+export async function installBridge(page: Page, failConnect = false, bothModels = false) {
   await page.addInitScript(
-    ({ theme, failConnect }) => {
+    ({ theme, failConnect, bothModels }) => {
       let currentTheme = theme;
       let device: Record<string, unknown> = {
         connected: false,
@@ -95,16 +95,22 @@ export async function installBridge(page: Page, failConnect = false) {
                 return structuredClone(device);
               case 'connect_device':
                 if (failConnect) throw new Error('DeviceNotFound');
+                if (bothModels && !args.model) {
+                  return { ...device, choices: ['nuphy-kick75-io', 'nuphy-air75-v3'] };
+                }
                 device = {
                   connected: true,
                   writable: true,
                   recovery_pending: false,
-                  model_id: 'nuphy-kick75-io',
+                  model_id: args.model ?? 'nuphy-kick75-io',
                   firmware: 'test',
                   profile: 'Mac',
                   main: { mode: 'effect', mode_id: 2, brightness: 60, color: null },
                 };
                 return structuredClone(device);
+              case 'air75_action':
+                if (device.model_id !== 'nuphy-air75-v3') throw new Error('NotConnected');
+                return { ...device, tested: true };
               case 'disconnect_device':
                 device = { connected: false, writable: false, recovery_pending: false };
                 return structuredClone(device);
@@ -115,6 +121,6 @@ export async function installBridge(page: Page, failConnect = false) {
         },
       });
     },
-    { theme: defaultTheme(), failConnect },
+    { theme: defaultTheme(), failConnect, bothModels },
   );
 }

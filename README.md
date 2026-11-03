@@ -12,7 +12,7 @@ A local AI status lighting companion, built around a Zig core for macOS and Wind
 
 ## What works today
 
-- Air75 V3 ANSI (`19f5:1028`, firmware `1.0.23.6`, macOS USB / Mac profile) supports a [read-only probe and experimental manual main-light control](docs/hardware/air75-v3.md), with independent readback and exact original-state recovery. Desktop connection, side/per-key control and automatic AI following remain disabled for this model.
+- Air75 V3 ANSI (`19f5:1028`, firmware `1.0.23.6`, macOS USB / Mac profile) supports a [read-only probe and experimental manual main-light control](docs/hardware/air75-v3.md), with independent readback and exact original-state recovery. The desktop app recognizes Air75, shows its ANSI layout and offers a short main-light test with automatic restoration. Air75 desktop control is limited to explicit solid-color tests.
 - P0 task tracking: pending input/approval, explicit test/build results, per-turn acknowledgement and Codex chat links. Per-state native main-light actions include flowing wave, vortex and glisten. Results require a wrapped command or explicit adapter; new effects await physical validation. See [P0 workflows](docs/P0_WORKFLOWS.md), [AgentEvent v2](docs/specs/agent-event-v2.md) and [Theme v3](docs/specs/theme-v3.md).
 - A Zig state engine that aggregates sessions, correlates tool and approval events, and rejects stale events after a turn ends.
 - A development-only simulated keyboard for offline protocol tests, write deduplication and crash-recovery tests; the App never uses this backend.

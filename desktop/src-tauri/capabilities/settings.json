@@ -11,6 +11,7 @@
     "allow-export-theme",
     "allow-get-device",
     "allow-connect-device",
+    "allow-air75-action",
     "allow-disconnect-device",
     "allow-acknowledge-task",
     "allow-open-task"

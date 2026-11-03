@@ -1,8 +1,9 @@
 import type { CSSProperties } from 'react';
+import air from '../../assets/keyboard-layouts/nuphy-air75-v3.json';
 import kick from '../../assets/keyboard-layouts/nuphy-kick75-io.json';
 import type { Signal, Action } from './theme';
 // Only actual supported device layouts belong in the runtime catalog.
-export const layouts = [kick];
+export const layouts = [kick, air];
 type Key = (typeof kick.keys)[number];
 const icons: Record<string, string> = {
   'rectangle.3.group': 'missioncontrol',

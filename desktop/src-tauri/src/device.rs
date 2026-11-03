@@ -3,11 +3,46 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub enum Model {
+    #[default]
+    #[serde(rename = "nuphy-kick75-io")]
+    Kick75,
+    #[serde(rename = "nuphy-air75-v3")]
+    Air75,
+}
+impl Model {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Kick75 => "nuphy-kick75-io",
+            Self::Air75 => "nuphy-air75-v3",
+        }
+    }
+
+    fn state_len(self) -> usize {
+        match self {
+            Self::Kick75 => 17,
+            Self::Air75 => 22,
+        }
+    }
+}
 // A narrow transport seam allows lifecycle tests without sending HID reports.
 pub trait Hardware {
     fn inspect(&self) -> Result<Value, String>;
     fn apply(&self, signal: &Value, identity: &str) -> Result<Value, String>;
     fn restore(&self, identity: &str) -> Result<Value, String>;
+    fn inspect_model(&self, model: Model) -> Result<Value, String> {
+        match model {
+            Model::Kick75 => self.inspect(),
+            Model::Air75 => Err("UnsupportedDevice".into()),
+        }
+    }
+    fn restore_model(&self, model: Model, identity: &str) -> Result<Value, String> {
+        match model {
+            Model::Kick75 => self.restore(identity),
+            Model::Air75 => Err("UnsupportedDevice".into()),
+        }
+    }
 }
 impl Hardware for Core {
     fn inspect(&self) -> Result<Value, String> {
@@ -18,6 +53,18 @@ impl Hardware for Core {
     }
     fn restore(&self, identity: &str) -> Result<Value, String> {
         self.restore_device(identity)
+    }
+    fn inspect_model(&self, model: Model) -> Result<Value, String> {
+        match model {
+            Model::Kick75 => self.inspect(),
+            Model::Air75 => self.inspect_air75(),
+        }
+    }
+    fn restore_model(&self, model: Model, identity: &str) -> Result<Value, String> {
+        match model {
+            Model::Kick75 => self.restore(identity),
+            Model::Air75 => self.restore_air75(identity),
+        }
     }
 }
 #[derive(Default, Deserialize, Serialize)]
@@ -35,6 +82,7 @@ struct Snapshot {
 }
 #[derive(Default)]
 struct Session {
+    model: Model,
     probe: Option<Value>,
     recovery: Recovery,
     restore_owned: bool,
@@ -55,18 +103,38 @@ fn bytes(value: &Value, count: usize) -> bool {
     })
 }
 fn valid_probe(probe: &Value) -> bool {
+    let model = match probe["model_id"].as_str() {
+        Some("nuphy-kick75-io") => Model::Kick75,
+        Some("nuphy-air75-v3") => Model::Air75,
+        _ => return false,
+    };
+    let identity_bytes = if model == Model::Air75 { 6 } else { 8 };
     probe["schema_version"] == 1
-        && probe["model_id"] == "nuphy-kick75-io"
         && probe["fingerprint"]
             .as_str()
             .is_some_and(|id| id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()))
-        && bytes(&probe["state"], 17)
+        && bytes(&probe["state"], model.state_len())
         && probe["state"][1].as_u64().is_some_and(|v| v <= 100)
-        && bytes(&probe["firmware"], 8)
-        && bytes(&probe["geometry"], 8)
+        && bytes(&probe["firmware"], identity_bytes)
+        && bytes(&probe["geometry"], identity_bytes)
         && matches!(probe["profile"].as_u64(), Some(0 | 1))
 }
 fn writable(probe: &Value) -> bool {
+    if probe["model_id"] == Model::Air75.id() {
+        return cfg!(target_os = "macos")
+            && valid_probe(probe)
+            && probe["profile"] == 0
+            && probe["led_count"] == 104
+            && probe["usb"]["input_bytes"] == 64
+            && probe["usb"]["output_bytes"] == 64
+            && probe["usb"]["vendor_id"] == 0x19f5
+            && probe["usb"]["product_id"] == 0x1028
+            && probe["usb"]["interface_number"] == 3
+            && probe["firmware"] == json!([23, 0, 1, 170, 6, 0])
+            && probe["geometry"]
+                .as_array()
+                .is_some_and(|v| v[..5] == [json!(0), json!(8), json!(4), json!(6), json!(16)]);
+    }
     cfg!(target_os = "macos")
         && valid_probe(probe)
         && probe["profile"] == 0
@@ -111,7 +179,10 @@ fn public(session: &Session) -> Value {
         let f = &probe["firmware"];
         result["writable"] = json!(writable(probe));
         result["native_main_effects"] = if writable(probe) {
-            json!(["solid", "marquee", "orbit", "blink"])
+            match session.model {
+                Model::Kick75 => json!(["solid", "marquee", "orbit", "blink"]),
+                Model::Air75 => json!(["solid"]),
+            }
         } else {
             json!([])
         };
@@ -134,15 +205,20 @@ fn refresh(session: &mut Session, hardware: &impl Hardware) -> Result<(), String
     // Mark an old reading unavailable before IO: no stale success on an error.
     session.probe = None;
     let result = (|| {
-        let snapshot: Snapshot =
-            serde_json::from_value(hardware.inspect()?).map_err(|_| "InvalidDeviceReply")?;
-        session.recovery = snapshot.recovery;
+        let snapshot: Snapshot = serde_json::from_value(hardware.inspect_model(session.model)?)
+            .map_err(|_| "InvalidDeviceReply")?;
+        if snapshot.probe.is_none() && snapshot.recovery.required {
+            session.recovery = snapshot.recovery;
+            return Err(snapshot
+                .device_error
+                .unwrap_or_else(|| "DeviceNotFound".into()));
+        }
         let probe = snapshot.probe.ok_or_else(|| {
             snapshot
                 .device_error
                 .unwrap_or_else(|| "DeviceNotFound".into())
         })?;
-        if !valid_probe(&probe) {
+        if !valid_probe(&probe) || probe["model_id"] != session.model.id() {
             return Err("InvalidDeviceReply".into());
         }
         let identity = probe["fingerprint"].as_str().ok_or("InvalidDeviceReply")?;
@@ -153,6 +229,7 @@ fn refresh(session: &mut Session, hardware: &impl Hardware) -> Result<(), String
         {
             return Err("DeviceChanged".into());
         }
+        session.recovery = snapshot.recovery;
         session.identity = Some(identity.to_owned());
         session.probe = Some(probe);
         Ok(())
@@ -173,7 +250,7 @@ fn restore_locked(session: &mut Session, hardware: &impl Hardware) -> Result<Val
             .unwrap_or_else(|| "RecoveryIdentityMismatch".into()));
     }
     let identity = session.identity.as_deref().ok_or("InvalidDeviceIdentity")?;
-    let result = match hardware.restore(identity) {
+    let result = match hardware.restore_model(session.model, identity) {
         Ok(result) => result,
         Err(error) => {
             let _ = refresh(session, hardware);
@@ -181,7 +258,7 @@ fn restore_locked(session: &mut Session, hardware: &impl Hardware) -> Result<Val
         }
     };
     if let Some(state) = result.get("state") {
-        if !bytes(state, 17) {
+        if !bytes(state, session.model.state_len()) {
             return Err("InvalidDeviceReply".into());
         }
         session.probe.as_mut().ok_or("NotConnected")?["state"] = state.clone();
@@ -247,6 +324,10 @@ impl Device {
         if session.probe.is_none() {
             return Err("NotConnected".into());
         }
+        if session.model == Model::Air75 {
+            session.following = false;
+            return Ok(public(&session));
+        }
         // Explicit Connect claims control after repairing any matching capture.
         if session.recovery.required {
             restore_locked(&mut session, core)?;
@@ -257,10 +338,12 @@ impl Device {
         Ok(public(&session))
     }
     pub fn follow_core(&self, core: &Core) {
-        let active = self
-            .session
-            .lock()
-            .is_ok_and(|s| s.following && s.probe.as_ref().is_some_and(writable) && !s.closing);
+        let active = self.session.lock().is_ok_and(|s| {
+            s.model == Model::Kick75
+                && s.following
+                && s.probe.as_ref().is_some_and(writable)
+                && !s.closing
+        });
         if !active {
             return;
         }
@@ -273,7 +356,11 @@ impl Device {
         status: Option<&Value>,
     ) -> Result<(), String> {
         let mut session = self.session.lock().map_err(|_| "DeviceLockFailed")?;
-        if session.closing || !session.following || session.probe.is_none() {
+        if session.model != Model::Kick75
+            || session.closing
+            || !session.following
+            || session.probe.is_none()
+        {
             return Ok(());
         }
         let result: Result<(), String> = (|| {
@@ -348,13 +435,35 @@ impl Device {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub fn connect(&self, core: &Core) -> Result<Value, String> {
         if core.simulated {
             return Err("SimulationNotAllowed".into());
         }
         self.connect_hardware(core)
     }
+    pub fn connect_selected(&self, core: &Core, requested: Option<Model>) -> Result<Value, String> {
+        if core.simulated {
+            return Err("SimulationNotAllowed".into());
+        }
+        let models = core.connected_models()?;
+        let model = match requested {
+            Some(model) if models.contains(&model) => model,
+            Some(_) => return Err("DeviceNotFound".into()),
+            None if models.len() > 1 => {
+                return Ok(json!({
+                    "connected": false, "writable": false, "recovery_pending": false, "choices": models
+                }))
+            }
+            None => models.first().copied().ok_or("DeviceNotFound")?,
+        };
+        self.connect_model(core, model)
+    }
+    #[cfg(test)]
     fn connect_hardware(&self, hardware: &impl Hardware) -> Result<Value, String> {
+        self.connect_model(hardware, Model::Kick75)
+    }
+    fn connect_model(&self, hardware: &impl Hardware, model: Model) -> Result<Value, String> {
         let mut session = self.session.lock().map_err(|_| "DeviceLockFailed")?;
         if session.closing {
             return Err("AppClosing".into());
@@ -363,6 +472,9 @@ impl Device {
         // and only when this App owns no capture that must first be restored.
         if session.probe.is_none() && !session.restore_owned && !session.recovery.required {
             session.identity = None;
+            session.model = model;
+        } else if session.model != model {
+            return Err("DeviceChanged".into());
         }
         refresh(&mut session, hardware)?;
         Ok(public(&session))
@@ -375,6 +487,38 @@ impl Device {
             let _ = refresh(&mut session, hardware);
         }
         Ok(public(&session))
+    }
+    pub fn air75_action(&self, core: &Core, signal: Option<&Value>) -> Result<Value, String> {
+        let mut session = self.session.lock().map_err(|_| "DeviceLockFailed")?;
+        if session.closing {
+            return Err("AppClosing".into());
+        }
+        if session.model != Model::Air75 || session.probe.is_none() {
+            return Err("NotConnected".into());
+        }
+        refresh(&mut session, core)?;
+        if !session.probe.as_ref().is_some_and(writable) {
+            return Err("UnverifiedDevice".into());
+        }
+        if let Some(signal) = signal {
+            if session.recovery.required {
+                return Err("RecoveryRequired".into());
+            }
+            let identity = session.identity.as_deref().ok_or("InvalidDeviceIdentity")?;
+            let result = core.test_air75(signal, identity);
+            let refreshed = refresh(&mut session, core);
+            if result.is_err() && refreshed.is_err() {
+                // The device may have disappeared with a durable capture.
+                session.recovery.required = true;
+            }
+            let result = result?;
+            refreshed?;
+            let mut reply = public(&session);
+            reply["tested"] = result["tested"].clone();
+            Ok(reply)
+        } else {
+            restore_locked(&mut session, core)
+        }
     }
     #[cfg(test)]
     pub fn apply(
@@ -420,6 +564,53 @@ impl Device {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "Requires an explicitly authorized USB Air75 V3 Mac-profile color test"]
+    fn manual_air75_desktop_color_test() {
+        let binary = std::env::var("KEYFLUX_TEST_CORE").expect("set KEYFLUX_TEST_CORE");
+        let core = Core::new(binary.into(), None, false);
+        let device = Device::default();
+        let connected = device.connect_selected(&core, Some(Model::Air75)).unwrap();
+        assert_eq!(connected["model_id"], "nuphy-air75-v3");
+        assert_eq!(connected["native_main_effects"], json!(["solid"]));
+        assert_eq!(connected["recovery_pending"], false, "existing capture");
+        let before = connected["state"].clone();
+        device.start_following(&core).unwrap();
+        assert!(!device.session.lock().unwrap().following);
+        let result = device
+            .air75_action(&core, Some(&json!({"color": "#00FFFF", "brightness": 15})))
+            .unwrap();
+        assert_eq!(result["tested"], true);
+        assert_eq!(result["state"], before);
+        assert_eq!(result["recovery_pending"], false);
+        assert_eq!(device.disconnect(&core).unwrap()["connected"], false);
+    }
+
+    #[test]
+    fn air75_never_routes_agent_status_to_a_setter() {
+        let mut probe: Value = serde_json::from_str::<Value>(include_str!(
+            "../../../docs/evidence/air75-v3-readonly-20261102.json"
+        ))
+        .unwrap()["probe"]
+            .clone();
+        probe["fingerprint"] = json!("a".repeat(64));
+        let device = Device {
+            session: Mutex::new(Session {
+                model: Model::Air75,
+                probe: Some(probe),
+                following: true,
+                ..Session::default()
+            }),
+        };
+        let hardware = Fake::default();
+        device
+            .follow_status(&hardware, Some(&agent_status("working", "#00FFFF")))
+            .unwrap();
+        device.start_following(&hardware).unwrap();
+        assert!(!device.session.lock().unwrap().following);
+        assert!(hardware.calls.lock().unwrap().is_empty());
+    }
+
     struct Fake {
         snapshot: Mutex<Value>,
         calls: Mutex<Vec<String>>,

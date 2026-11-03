@@ -74,6 +74,76 @@ impl Core {
     pub fn inspect_device(&self) -> Result<Value, String> {
         self.execute(&["hardware-status"], None, false)
     }
+    pub fn connected_models(&self) -> Result<Vec<crate::device::Model>, String> {
+        use crate::device::Model;
+        let inventory = self.execute(&["diagnose"], None, false)?;
+        let devices = inventory["devices"]
+            .as_array()
+            .ok_or("InvalidDeviceReply")?;
+        let mut models = Vec::new();
+        for (model, product_id) in [(Model::Kick75, 0x1026), (Model::Air75, 0x1028)] {
+            if devices.iter().any(|device| {
+                device["vendor_id"] == 0x19f5
+                    && device["product_id"] == product_id
+                    && device["bus_type"] == 1
+                    && device["usage_page"] == 1
+                    && device["usage"] == 0
+                    && device["interface_number"] == 3
+            }) {
+                models.push(model);
+            }
+        }
+        Ok(models)
+    }
+    pub fn inspect_air75(&self) -> Result<Value, String> {
+        let mut status = self.execute(&["hardware-status-air75"], None, false)?;
+        let mut fingerprint = status["fingerprint"].take();
+        if let Some(bytes) = fingerprint.as_array() {
+            let bytes = bytes
+                .iter()
+                .map(|byte| byte.as_u64().and_then(|n| u8::try_from(n).ok()))
+                .collect::<Option<Vec<_>>>()
+                .ok_or("InvalidDeviceReply")?;
+            fingerprint = json!(String::from_utf8(bytes).map_err(|_| "InvalidDeviceReply")?);
+        }
+        let probe = status["probe"]
+            .as_object_mut()
+            .ok_or("InvalidDeviceReply")?;
+        probe.insert("fingerprint".into(), fingerprint);
+        Ok(status)
+    }
+    pub fn test_air75(&self, signal: &Value, identity: &str) -> Result<Value, String> {
+        let color = signal["color"].as_str().ok_or("InvalidSignal")?;
+        let brightness = signal["brightness"]
+            .as_u64()
+            .filter(|v| *v <= 100)
+            .ok_or("InvalidSignal")?;
+        if color.len() != 7
+            || !color.starts_with('#')
+            || !color.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)
+        {
+            return Err("InvalidSignal".into());
+        }
+        let brightness = brightness.min(15).to_string();
+        self.execute(
+            &[
+                "hardware-test-air75",
+                color,
+                &brightness,
+                "--expect-device",
+                identity,
+            ],
+            None,
+            false,
+        )
+    }
+    pub fn restore_air75(&self, identity: &str) -> Result<Value, String> {
+        self.execute(
+            &["hardware-restore-air75", "--expect-device", identity],
+            None,
+            false,
+        )
+    }
     // Native source only; never exposed as a WebView command.
     pub(crate) fn emit_local_event(&self, event: &Value) -> Result<(), String> {
         self.execute(&["emit"], Some(event), true).map(|_| ())
@@ -161,7 +231,12 @@ impl Core {
             let _ = stderr.take(16385).read_to_end(&mut bytes);
             bytes
         });
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let timeout = match args.first().copied() {
+            Some("hardware-test-air75") => 30,
+            Some("hardware-restore-air75") => 20,
+            _ => 5,
+        };
+        let deadline = Instant::now() + Duration::from_secs(timeout);
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status),

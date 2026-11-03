@@ -38,10 +38,7 @@ test('compact console, custom menus and independent channel colors', async ({ pa
   await page.getByRole('button', { name: '默认', exact: true }).click();
   await expect(page.getByLabel('启用条形灯')).not.toBeChecked();
   await expect(page.locator('.strip-aperture')).toHaveCount(0);
-  await page.getByRole('button', { name: '键盘型号', exact: true }).click();
-  await expect(page.getByRole('listbox', { name: '键盘型号' })).toBeVisible();
-  await expect(page.getByRole('option')).toHaveCount(1);
-  await page.getByRole('button', { name: '键盘型号', exact: true }).press('Escape');
+  await expect(page.getByLabel('键盘型号')).toContainText('Kick75');
   await page.getByRole('button', { name: '主键区', exact: true }).click();
   await expect(page.getByLabel('跟随状态')).toHaveCount(0);
   expect(errors).toEqual([]);
@@ -171,7 +168,7 @@ test('startup requires explicit USB connection and failed attempts stay locked',
   await expect(page.getByRole('button', { name: '连接 USB 键盘', exact: true })).toBeEnabled();
   await expect(page.locator('.console')).toHaveCount(0);
   await expect(page.locator('.keyboard')).toHaveCSS('--light-color', '#55575a');
-  for (const label of ['键盘型号', '更多操作', '保存', '默认']) {
+  for (const label of ['更多操作', '保存', '默认']) {
     await expect(page.getByRole('button', { name: label, exact: true })).toBeDisabled();
   }
   await expect(page.getByLabel('跟随状态')).toHaveCount(0);
@@ -183,7 +180,7 @@ test('startup requires explicit USB connection and failed attempts stay locked',
     ),
   ).not.toContain('connect_device');
   await page.getByRole('button', { name: '连接 USB 键盘', exact: true }).click();
-  await expect(page.locator('.feedback')).toContainText('未找到 Kick75');
+  await expect(page.locator('.feedback')).toContainText('未找到支持的键盘');
   await expect(page.locator('.console')).toHaveCount(0);
   await expect(page.getByRole('button', { name: '更多操作', exact: true })).toBeDisabled();
 });
@@ -251,4 +248,38 @@ test('per-state native actions preview and save with no device preview command',
   await page.getByRole('button', { name: '工作中', exact: true }).click();
   await expect(page.locator('.keyboard')).toHaveClass(/effect-orbit/);
   await page.screenshot({ path: 'test-results/p0-effects.png' });
+});
+
+test('Air75 selection binds the preview and only the explicit action tests its main light', async ({
+  page,
+}) => {
+  await installBridge(page, false, true);
+  await page.goto('/');
+  await page.getByRole('button', { name: '连接 USB 键盘', exact: true }).click();
+  const air = page.getByRole('button', { name: 'Air75 V3', exact: true });
+  await expect(air).toBeVisible();
+  const priorPolls = await page.evaluate(() => {
+    const bridge = (window as unknown as { __testBridge: { calls: string[] } }).__testBridge;
+    return bridge.calls.filter((call) => call === 'get_device').length;
+  });
+  await page.waitForFunction((count) => {
+    const bridge = (window as unknown as { __testBridge: { calls: string[] } }).__testBridge;
+    return bridge.calls.filter((call) => call === 'get_device').length > count;
+  }, priorPolls);
+  await air.click();
+  await expect(page.getByRole('img', { name: 'Air75 V3 灯光预览' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '条形灯', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('灯光动作', { exact: true })).toHaveCount(0);
+  await page.getByLabel('红色通道').fill('128');
+  const countTests = () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __testBridge: { calls: string[] } }).__testBridge.calls.filter(
+          (call) => call === 'air75_action',
+        ).length,
+    );
+  expect(await countTests()).toBe(0);
+  await page.getByRole('button', { name: '测试主灯', exact: true }).click();
+  await expect(page.locator('.feedback')).toContainText('原灯效已恢复');
+  expect(await countTests()).toBe(1);
 });

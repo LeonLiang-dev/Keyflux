@@ -76,15 +76,33 @@ async fn get_device(core: State<'_, Shared>, device: State<'_, SharedDevice>) ->
     blocking(move || device.status(core.as_ref())).await
 }
 #[tauri::command]
-async fn connect_device(core: State<'_, Shared>, device: State<'_, SharedDevice>) -> Reply {
+async fn connect_device(
+    core: State<'_, Shared>,
+    device: State<'_, SharedDevice>,
+    model: Option<device::Model>,
+) -> Reply {
     let core = core.inner().clone();
     let device = device.inner().clone();
     blocking(move || {
         core.ensure()?;
-        device.connect(&core)?;
-        device.start_following(core.as_ref())
+        let connected = device.connect_selected(&core, model)?;
+        if connected["connected"] == true {
+            device.start_following(core.as_ref())
+        } else {
+            Ok(connected)
+        }
     })
     .await
+}
+#[tauri::command]
+async fn air75_action(
+    core: State<'_, Shared>,
+    device: State<'_, SharedDevice>,
+    signal: Option<Value>,
+) -> Reply {
+    let core = core.inner().clone();
+    let device = device.inner().clone();
+    blocking(move || device.air75_action(&core, signal.as_ref())).await
 }
 #[tauri::command]
 async fn disconnect_device(core: State<'_, Shared>, device: State<'_, SharedDevice>) -> Reply {
@@ -254,6 +272,7 @@ fn main() {
             save_theme,
             get_device,
             connect_device,
+            air75_action,
             disconnect_device,
             import_theme,
             export_theme,

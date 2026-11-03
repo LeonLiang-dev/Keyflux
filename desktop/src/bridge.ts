@@ -51,6 +51,8 @@ export interface Device {
   profile?: string;
   state?: number[];
   restored?: boolean;
+  tested?: boolean;
+  choices?: string[];
 }
 export async function command<T>(name: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauri()) throw new Error('请通过 Tauri 启动应用并连接真实 USB 键盘');

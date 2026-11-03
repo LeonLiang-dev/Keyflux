@@ -5,6 +5,7 @@ fn main() {
         "save_theme",
         "get_device",
         "connect_device",
+        "air75_action",
         "disconnect_device",
         "import_theme",
         "export_theme",

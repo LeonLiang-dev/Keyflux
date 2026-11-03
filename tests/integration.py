@@ -146,7 +146,7 @@ class RuntimeTest(unittest.TestCase):
         for args in [("hardware-solid-air75", "#00FFFF", "15"), ("hardware-restore-air75",), ("hardware-status-air75",)]:
             result = self.call(*args, check=False)
             self.assertEqual(json.loads(result.stdout)["code"], "HardwareRequiresDefaultStateDirectory")
-        for args, code in [(("hardware-solid-air75",), "ExpectedColorAndBrightness"), (("hardware-solid-air75", "#00FFFF", "101"), "InvalidBrightness"), (("hardware-restore-air75", "extra"), "UnexpectedArgument"), (("hardware-status-air75", "extra"), "UnexpectedArgument")]:
+        for args, code in [(("hardware-solid-air75",), "ExpectedColorAndBrightness"), (("hardware-solid-air75", "#00FFFF", "101"), "InvalidBrightness"), (("hardware-restore-air75", "extra"), "UnexpectedArgument"), (("hardware-status-air75", "extra"), "UnexpectedArgument"), (("hardware-test-air75", "#00FFFF", "16"), "InvalidBrightness"), (("hardware-test-air75", "#00FFFF", "15"), "InvalidDeviceIdentity")]:
             result = subprocess.run([EXE, *args], capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 1)
             self.assertEqual(json.loads(result.stdout)["code"], code)

@@ -19,6 +19,7 @@ const usage =
     \\  keyflux hardware-probe-air75           Read-only Air75 V3 ANSI 1.0.23.6 snapshot
     \\  keyflux hardware-status-air75          Air75 main recovery status (Mac USB)
     \\  keyflux hardware-solid-air75 '#00FFFF' 15   Manual Air75 main color + capture
+    \\  keyflux hardware-test-air75 '#00FFFF' 15    Short Air75 main test + automatic recovery
     \\  keyflux hardware-restore-air75         Exact Air75 original main recovery
     \\  keyflux hardware-status                Read-only device + durable recovery status
     \\  keyflux hardware-solid '#00FFFF' 15    Manual main-light color; durable capture
@@ -38,7 +39,7 @@ const usage =
     \\  keyflux setup-codex /absolute/keyflux   Print reviewable hook and OTel fragments
     \\  --state-dir PATH                       Isolated runtime data / IPC namespace
     \\Experimental macOS USB control: Kick75 4.0.18.6 or Air75 V3 ANSI 1.0.23.6, Mac profile.
-    \\Physical mutations use the default recovery directory; Air75 control is manual CLI only.
+    \\Physical mutations use the default recovery directory; Air75 control requires an explicit test or manual command.
     \\
 ;
 
@@ -419,14 +420,16 @@ fn run(init: std.process.Init) !void {
         try output(a, try air75.probe());
         return;
     }
-    if (eq(command, "hardware-solid-air75") or eq(command, "hardware-restore-air75") or eq(command, "hardware-status-air75")) {
+    const test_air75 = eq(command, "hardware-test-air75");
+    if (test_air75 or eq(command, "hardware-solid-air75") or eq(command, "hardware-restore-air75") or eq(command, "hardware-status-air75")) {
         if (directory != null or simulate or port != 0) return error.HardwareRequiresDefaultStateDirectory;
         const status_only = eq(command, "hardware-status-air75");
         var light: ?devices.Lighting = null;
-        if (eq(command, "hardware-solid-air75")) {
+        if (test_air75 or eq(command, "hardware-solid-air75")) {
             if (positional.items.len != 3) return error.ExpectedColorAndBrightness;
             light = .{ .color = try themes.Color.parse(positional.items[1]), .brightness = try std.fmt.parseInt(u8, positional.items[2], 10) };
-            if (light.?.brightness > 100) return error.InvalidBrightness;
+            if (light.?.brightness > @as(u8, if (test_air75) 15 else 100)) return error.InvalidBrightness;
+            if (test_air75 and expected_device == null) return error.InvalidDeviceIdentity;
         } else if (positional.items.len != 1 or (status_only and expected_device != null)) return error.UnexpectedArgument;
         if (p.kf_init(null) != 0) return error.StateDirectoryUnavailable;
         var keyboard: air75_control.Keyboard = .{};
@@ -440,7 +443,18 @@ fn run(init: std.process.Init) !void {
             if (journal) |record| record.validate(keyboard.info, keyboard.fingerprint) catch |err| {
                 recovery_code = @errorName(err);
             };
-            try output(a, .{ .ok = true, .probe = keyboard.info, .fingerprint = keyboard.fingerprint, .recovery = .{ .required = journal != null, .pending = if (journal) |record| record.pending else false, .compatible = journal != null and recovery_code == null, .code = recovery_code }, .manual_main_control_available = true, .desktop_support_enabled = false });
+            try output(a, .{ .ok = true, .probe = keyboard.info, .fingerprint = keyboard.fingerprint, .recovery = .{ .required = journal != null, .pending = if (journal) |record| record.pending else false, .compatible = journal != null and recovery_code == null, .code = recovery_code }, .manual_main_control_available = true, .desktop_support_enabled = true });
+        } else if (test_air75) {
+            if (try storage.load() != null) return error.RecoveryRequired;
+            const tested = try air75_control.execute(&keyboard, &storage, light);
+            if (tested.changed) {
+                keyboard.delay(3000);
+                keyboard.info.state = try keyboard.readState();
+                if (!std.mem.eql(u8, &keyboard.info.state, &tested.state)) return error.ConcurrentDeviceChange;
+                const restored = try air75_control.execute(&keyboard, &storage, null);
+                if (!restored.restored) return error.RecoveryRequired;
+            }
+            try output(a, .{ .ok = true, .tested = tested.changed });
         } else try output(a, try air75_control.execute(&keyboard, &storage, light));
         return;
     }

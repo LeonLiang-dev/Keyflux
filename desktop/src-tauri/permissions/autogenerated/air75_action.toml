@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-air75-action"
+description = "Enables the air75_action command without any pre-configured scope."
+commands.allow = ["air75_action"]
+
+[[permission]]
+identifier = "deny-air75-action"
+description = "Denies the air75_action command without any pre-configured scope."
+commands.deny = ["air75_action"]

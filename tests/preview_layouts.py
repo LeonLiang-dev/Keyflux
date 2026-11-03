@@ -26,7 +26,7 @@ class PreviewContractTest(unittest.TestCase):
     def test_shipped_models_are_distinct_valid_layouts(self):
         other = json.loads((ROOT / "assets/keyboard-layouts/nuphy-air75-v3.json").read_text(encoding="utf-8"))
         self.assertNotEqual(validator.validate(self.layout), validator.validate(other))
-        self.assertTrue(other["preview_only"])
+        self.assertFalse(other["preview_only"])
         self.assertEqual(len(self.layout["keys"]), 81)
         self.assertTrue(any(k["kind"] == "knob" for k in self.layout["keys"]))
         self.assertTrue(any(k["label"] == "F14" for k in self.layout["keys"]))
